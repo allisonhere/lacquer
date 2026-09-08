@@ -1,0 +1,113 @@
+name: lacquer
+x-app-environment: &app-environment
+  NODE_ENV: development
+  APP_URL: ${APP_URL:-http://localhost:5173}
+  INSTALLATION_CURRENCY: ${INSTALLATION_CURRENCY:-USD}
+  SESSION_SECRET: ${SESSION_SECRET:-development-only-change-me-32-characters-minimum}
+  DATABASE_URL: postgresql://lacquer:lacquer_dev@postgres:5432/lacquer
+  REDIS_URL: redis://redis:6379
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: lacquer
+      POSTGRES_PASSWORD: lacquer_dev
+      POSTGRES_DB: lacquer
+    ports: ['127.0.0.1:5432:5432']
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/01-test.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U lacquer -d lacquer']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--maxmemory-policy',
+        'noeviction',
+      ]
+    ports: ['127.0.0.1:6379:6379']
+    volumes: ['redis-data:/data']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build: { context: ., dockerfile: docker/Dockerfile, target: api }
+    environment: *app-environment
+    command: ['pnpm', '--filter', '@lacquer/db', 'migrate']
+    depends_on:
+      postgres: { condition: service_healthy }
+  api:
+    build: { context: ., dockerfile: docker/Dockerfile, target: api }
+    environment: *app-environment
+    ports: ['127.0.0.1:3001:3001']
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    init: true
+    stop_grace_period: 20s
+  web:
+    build: { context: ., dockerfile: docker/Dockerfile, target: web }
+    environment:
+      NODE_ENV: development
+      API_INTERNAL_URL: http://api:3001
+      ORIGIN: ${APP_URL:-http://localhost:5173}
+      HOST: 0.0.0.0
+      PORT: 5173
+    ports: ['127.0.0.1:5173:5173']
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:5173/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    init: true
+    stop_grace_period: 20s
+  worker:
+    build: { context: ., dockerfile: docker/Dockerfile, target: worker }
+    environment: *app-environment
+    depends_on:
+      redis: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3002/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    init: true
+    stop_grace_period: 20s
+volumes:
+  postgres-data:
+  redis-data:

@@ -1,0 +1,27 @@
+{
+  "name": "@lacquer/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "fastify": "^5.7.4",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/swagger": "^9.7.0",
+    "@fastify/swagger-ui": "^5.2.5",
+    "fastify-type-provider-zod": "^6.1.0",
+    "argon2": "^0.44.0",
+    "ioredis": "^5.9.2",
+    "drizzle-orm": "^0.45.1",
+    "@lacquer/db": "workspace:*",
+    "@lacquer/schemas": "workspace:*",
+    "@lacquer/types": "workspace:*",
+    "zod": "^4.3.6"
+  }
+}

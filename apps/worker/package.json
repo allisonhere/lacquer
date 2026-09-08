@@ -1,0 +1,19 @@
+{
+  "name": "@lacquer/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "demo": "tsx src/demo.ts"
+  },
+  "dependencies": {
+    "bullmq": "^5.67.0",
+    "ioredis": "^5.9.2",
+    "pino": "^10.3.0",
+    "@lacquer/schemas": "workspace:*"
+  }
+}

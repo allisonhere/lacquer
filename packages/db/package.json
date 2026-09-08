@@ -1,0 +1,26 @@
+{
+  "name": "@lacquer/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "generate": "drizzle-kit generate",
+    "migrate": "tsx src/migrate.ts",
+    "seed": "tsx src/seed.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.1",
+    "postgres": "^3.4.8",
+    "argon2": "^0.44.0",
+    "@lacquer/types": "workspace:*",
+    "@lacquer/schemas": "workspace:*"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.8"
+  }
+}
