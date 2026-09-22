@@ -71,6 +71,7 @@ services:
     environment:
       NODE_ENV: development
       API_INTERNAL_URL: http://api:3001
+      SESSION_SECRET: ${SESSION_SECRET:-development-only-change-me-32-characters-minimum}
       ORIGIN: ${APP_URL:-http://localhost:5173}
       HOST: 0.0.0.0
       PORT: 5173

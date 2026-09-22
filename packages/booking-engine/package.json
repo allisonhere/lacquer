@@ -10,5 +10,7 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@lacquer/types": "workspace:*"
+  }
 }

@@ -39,6 +39,13 @@ export const configSchema = databaseConfigSchema
     API_HOST: z.string().default('0.0.0.0'),
     API_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     WORKER_PORT: z.coerce.number().int().min(1).max(65535).default(3002),
+    /**
+     * Requests per minute per client IP. The default suits a single salon, but
+     * a busy front desk behind one NAT address — or a browser test run — is a
+     * legitimate reason to raise it. Throttling of the auth routes is stricter
+     * and separate; this is the general ceiling.
+     */
+    RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100000).default(120),
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),

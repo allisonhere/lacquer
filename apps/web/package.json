@@ -13,7 +13,8 @@
     "@lacquer/schemas": "workspace:*",
     "@lacquer/types": "workspace:*",
     "@lacquer/ui": "workspace:*",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "@lacquer/booking-engine": "workspace:*"
   },
   "devDependencies": {
     "@sveltejs/kit": "^2.50.2",

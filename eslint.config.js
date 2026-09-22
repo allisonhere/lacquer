@@ -14,7 +14,8 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   ...svelte.configs['flat/recommended'],
   {
-    files: ['**/*.svelte'],
+    // `.svelte.ts` modules carry runes and need the Svelte parser too.
+    files: ['**/*.svelte', '**/*.svelte.ts'],
     languageOptions: { parserOptions: { parser: tseslint.parser } },
   },
   {

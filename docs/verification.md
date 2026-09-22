@@ -1,36 +1,125 @@
-# Milestone 1 verification
+# Current verification — Milestone 4
 
-Verified on 2026-09-07. Final static/runtime/browser checks used Node 22.23.2 and pnpm 10.30.3. Earlier iterations used the host Node 26.7.0. Because the host denied Docker socket access, real temporary PostgreSQL 18.4 and Redis 7.4.2 services were used. Compose/CI target PostgreSQL 17 and Redis 7; their container execution is not verified here.
+Verified on 2026-09-08. The [Milestone 4 handoff](handoff-milestone-4.md) is the
+current record. All 100 unit tests, 60 integration tests, and all three browser
+journeys pass. Lint, typecheck, build, focused Milestone 3 concurrency/idempotency,
+and 12 focused timezone/DST checks pass. All four migrations applied to a new
+disposable test database, which was removed after verification. Existing records
+below describe earlier milestones rather than the current scope.
 
-## Successful commands and checks
+# Historical verification — Milestone 3
 
-- `pnpm install` and `pnpm install --frozen-lockfile --offline`: succeeded. pnpm was initially unavailable; it was downloaded with npm and made available through a temporary PATH entry.
-- `pnpm db:generate`: generated the initial seven-table migration and Drizzle metadata.
-- `pnpm db:migrate`: applied migrations to the development database. Integration tests separately applied them to the dedicated test database.
-- `pnpm db:seed`: created the fake owner/technician, two salons and two locations.
-- `pnpm lint`: passed.
-- `pnpm format:check`: passed.
-- `pnpm typecheck`: passed, including root test/config files and Svelte diagnostics.
-- `pnpm test`: 13 passed; one intentional booking-engine todo placeholder.
-- `pnpm test:integration`: 14 passed against real PostgreSQL/Redis, including cross-tenant read/write denial, role overrides, revoked memberships, suspended tenants, single-use auth tokens, session revocation, throttling, and dependency-outage readiness.
-- `pnpm build`: passed.
-- `pnpm exec playwright install chromium`: succeeded; Playwright used its Ubuntu fallback browser build on this host.
-- `pnpm test:e2e`: final run passed (one Chromium flow). Covers app load, registration, two salons, location creation, switching tenants, logout, login, dashboard and mobile overflow check. Desktop/mobile screenshots are in the ignored test-results directory.
-- `pnpm job:demo`: queued successfully; worker logs confirmed completion.
-- `python /tmp/lacquer-runtime-check.py`: temporary verification harness started API/worker under Node 22 on isolated ports, checked health/readiness, processed demo jobs, sent SIGTERM and SIGINT, and confirmed exit code 0 for all four process runs.
-- `pnpm audit --prod`: final run reported no known vulnerabilities after the documented Fastify static dependency override.
-- `docker compose config --quiet`: passed.
+The 2026-09-07 verification results are recorded in [the Milestone 3 handoff](handoff-milestone-3.md). All 96 unit tests and 51 integration tests pass, along with lint, typecheck, and build. PostgreSQL and Redis Compose startup and fresh-database migrations succeeded. The earlier results below are historical Milestone 1/2 records.
 
-## Failed attempts and corrections
+The subsequent local preview setup also succeeded: `pnpm db:migrate`,
+`pnpm db:seed`, and `pnpm dev`. An HTTP check of
+`http://localhost:5173/login` succeeded and the page was opened in the browser.
+This does not add a browser sign-in test to the automated results above. See the
+handoff for restart instructions and demo credentials.
 
-Initial typecheck found date transport mismatches, a missing web Zod dependency and a logger typing issue; corrected. Initial lint found Svelte navigation resolution issues; corrected. Browser runs exposed accessible-label hint text and an empty-body JSON header on logout; both corrected and the final smoke run passed. The first production dependency audit found two Fastify static advisories; the patched compatible dependency passed audit and OpenAPI integration tests.
+# Verification
 
-Sandboxed network/socket operations failed during setup and migration execution; authorized runs outside the sandbox succeeded. An initial temporary PostgreSQL initialization retry found an already-initialized directory; startup reused that directory. Initial browser installation in the sandbox could not finish; the authorized installation succeeded.
+Commands actually executed in the implementation environment, with their
+results. Nothing below is aspirational.
+
+## Milestone 1
+
+Recorded when the foundation was built: lint, format, typecheck, unit tests,
+build, integration tests against real PostgreSQL and Redis, and the Playwright
+smoke flow. All passed.
+
+## Milestone 2
+
+Environment: Node 26.7.0, pnpm 10.30.3, PostgreSQL 17 and Redis 7 reachable on
+`127.0.0.1:5432` and `127.0.0.1:6379`.
+
+### Successful commands and checks
+
+```sh
+pnpm install --frozen-lockfile          # lockfile already satisfied
+pnpm lint                               # clean
+pnpm format:check                       # clean
+pnpm typecheck                          # 9 packages, 0 errors
+pnpm test                               # 7 files, 66 unit tests passed
+pnpm build                              # all packages, web artifact built
+pnpm test:integration                   # 2 files, 32 tests passed
+pnpm --filter @lacquer/db migrate       # applied 0001 to lacquer and lacquer_test
+pnpm --filter @lacquer/db seed          # run twice; row counts identical
+pnpm exec playwright test               # 2 specs passed
+```
+
+Migration `0001_legal_energizer.sql` was applied to a database already carrying
+Milestone 1 data, and separately to `lacquer_test`. The up-path is valid on a
+populated database; no earlier migration was edited.
+
+Database-level guarantees were checked directly with `psql` rather than trusted
+from the schema definition:
+
+- inserting a `staff_location_assignments` row joining one salon's technician to
+  another salon's location is rejected by
+  `staff_location_assignments_location_fk`
+- a negative `services.base_price` is rejected by
+  `services_base_price_non_negative`
+- a `staff_schedule_blocks` row with `start_minute >= end_minute` is rejected by
+  `staff_schedule_blocks_bounds`
+
+The seed was run twice in succession; the demo salon still held exactly 2 staff,
+2 locations, 4 categories, 4 services, 3 variants, 3 add-ons, 5 skills, 12
+schedule blocks, 1 time-off record, 2 availability overrides, and 1 technician
+service override.
+
+### Failed attempts and corrections
+
+- **Migration ordering.** `drizzle-kit generate` emitted
+  `ALTER TABLE locations ADD CONSTRAINT locations_id_tenant_unique` as the final
+  statement, after the composite foreign keys that reference it, so the first
+  `migrate` failed with "there is no unique constraint matching given keys".
+  The statement was moved to the head of the file. The migration had never been
+  applied anywhere, so editing it was safe.
+- **DST gap resolution.** The first `zonedWallClockToUtc` used the usual
+  two-pass offset estimate. Its own test caught that 02:30 on a spring-forward
+  day resolved _backwards_ to 01:30. It now derives two candidates, keeps the
+  one that round-trips, and resolves a gap forward and an overlap to the first
+  occurrence.
+- **Zod 4 schema composition.** `.refine()` returns a `ZodObject` rather than a
+  wrapper, so `.innerType()` does not exist and `.partial()` drops refinements.
+  Create, patch, and response schemas are now all derived from a shared base
+  object with cross-field rules attached separately.
+- **Schedule editor discarded unsaved edits.** The editor rebuilt its draft from
+  props whenever the parent refetched, so a background reload wiped a half-typed
+  week. It now compares the saved schedule by content and never rebuilds while
+  edits are pending. Found by the browser suite.
+- **Accessible names absorbed hint text.** Several new fields wrapped both the
+  input and its hint in one `<label>`, making the accessible name include the
+  hint. Explicit `aria-label`s were added. The schedule editor's Remove button
+  was also reworded, since "Remove Monday work starting 09:00" contained the
+  time field's own name.
+- **Success notice appeared before its reload finished.** `act()` announced
+  success between the write and the refetch, so a follow-up action could start
+  against a panel that was about to be replaced. The notice now appears only
+  after the reload settles.
+
+### Environment notes
+
+- The default Compose ports were already held by a previously started stack, so
+  `playwright.config.ts` now reads `E2E_API_PORT` / `E2E_WEB_PORT` and passes
+  matching `APP_URL`/`ORIGIN`/`API_INTERNAL_URL` to the servers it starts. Both
+  specs were run on alternate ports.
+- `RATE_LIMIT_MAX` was introduced (default 120, unchanged) because a whole
+  browser suite — or a busy front desk behind one NAT address — legitimately
+  exceeds the previously hardcoded ceiling.
 
 ## Unverified / remaining limitations
 
-`docker info` and `docker compose build` failed with permission denied for `/var/run/docker.sock`, including outside the sandbox. Therefore `docker compose up --build`, image construction, container DNS, and a complete clean-checkout Docker startup were not demonstrated. Compose configuration passed static validation and was reviewed for service hostnames, dependency ordering, migrations and health checks. The GitHub Actions workflow is present but was not run remotely.
-
-The milestone cannot be claimed fully complete against every requested completion criterion until Docker startup is verified on a Docker-enabled host. Backend, web, worker and browser behavior were verified through the native setup.
-
-Email delivery/public magic-link, verification and password-reset endpoints remain deferred; their internal token services are implemented and tested. Membership/toggle administration is not exposed. Expired session/token cleanup is deferred. API/worker runtime images retain TypeScript tooling. All later booking/payment/CRM features remain absent.
+- **Docker Compose was not started.** The Docker daemon is not accessible to
+  the current user in this environment (`permission denied` on
+  `/var/run/docker.sock`; the account is not in the `docker` group).
+  `docker compose config` parses `compose.yml` successfully and all six
+  services resolve, but `docker compose up --build` was not executed. Postgres
+  and Redis were reached directly instead.
+- The public booking flow, availability search, and appointment behaviour do
+  not exist and are not tested; that is Milestone 3.
+- Automatic breaks, daily technician limits, double-booking modes, and service
+  prerequisites are stored and served but deliberately not enforced.
+- Browser coverage is a single end-to-end journey plus the Milestone 1 smoke
+  flow, not exhaustive visual testing.

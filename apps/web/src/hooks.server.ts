@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { env } from '$env/dynamic/private';
 import type { Handle } from '@sveltejs/kit';
 const apiOrigin = env.API_INTERNAL_URL ?? 'http://127.0.0.1:3001';
@@ -28,6 +29,20 @@ export const handle: Handle = async ({ event, resolve }) => {
       const value = event.request.headers.get(key);
       if (value) headers.set(key, value);
     }
+    // These server-only headers are never copied from the incoming request.
+    if (
+      event.url.pathname.startsWith('/api/v1/public/') &&
+      env.SESSION_SECRET
+    ) {
+      const client = event.getClientAddress();
+      headers.set('x-lacquer-client', client);
+      headers.set(
+        'x-lacquer-client-signature',
+        createHmac('sha256', env.SESSION_SECRET)
+          .update(`lacquer:public-client:v1:${client}`)
+          .digest('hex'),
+      );
+    }
     try {
       const response = await fetch(
         `${parsed.origin}${event.url.pathname}${event.url.search}`,
@@ -49,6 +64,7 @@ export const handle: Handle = async ({ event, resolve }) => {
         'retry-after',
         'x-request-id',
         'x-content-type-options',
+        'referrer-policy',
       ]) {
         const value = response.headers.get(key);
         if (value) outgoing.set(key, value);
@@ -74,6 +90,13 @@ export const handle: Handle = async ({ event, resolve }) => {
   }
   const response = await resolve(event);
   response.headers.set('X-Content-Type-Options', 'nosniff');
-  response.headers.set('Referrer-Policy', 'same-origin');
+  response.headers.set(
+    'Referrer-Policy',
+    event.url.pathname.startsWith('/book/') ? 'no-referrer' : 'same-origin',
+  );
+  if (event.url.pathname.startsWith('/book/')) {
+    response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('X-Robots-Tag', 'noindex');
+  }
   return response;
 };

@@ -59,3 +59,114 @@ For this milestone every active member can read tenant/location basics. Mutation
 Service worker caching is restricted to public build/static assets. Navigations and API responses remain network-only. The manifest includes generated placeholder PNG/SVG icons and standalone display; HTTPS or localhost is required for browser installation. Branding and offline workflows are deferred.
 
 OpenAPI is generated through the Fastify Zod type provider and @fastify/swagger. Drizzle migrations are generated and committed with their snapshots/journal. See the upstream [Fastify type-provider documentation](https://fastify.dev/docs/latest/Reference/Type-Providers/) and [Drizzle migration generation documentation](https://orm.drizzle.team/docs/drizzle-kit-generate).
+
+## Milestone 2: salon operations
+
+The service catalog and staff scheduling primitives. No booking, availability
+search, or appointment behaviour exists yet; this milestone builds the data
+model and admin workflows the booking engine will consume.
+
+### Tenant isolation through composite keys
+
+Every tenant-owned child table carries `tenant_id` and references its parent
+with a **composite foreign key** that includes it — for example
+`staff_location_assignments (staff_id, tenant_id) → staff_profiles (id, tenant_id)`.
+A row pointing at another salon's record is therefore not representable, no
+matter what the application layer does. Application code still scopes every
+query through `tenantScope`; the constraints are the backstop, not the plan.
+
+Services check membership of referenced IDs before writing, so a cross-tenant
+reference surfaces as `404 Not Found` rather than a foreign-key `409` — the
+boundary looks the same from outside as a record that does not exist.
+
+### Money
+
+Integer minor currency units throughout (`7500` is `$75.00`). No float ever
+holds a price. `@lacquer/booking-engine` owns parsing and formatting; the admin
+UI converts only at the form boundary. The installation currency is
+single-valued and comes from configuration.
+
+### Time
+
+Two different kinds of time, deliberately never conflated:
+
+| Concept                      | Storage                                       |
+| ---------------------------- | --------------------------------------------- |
+| Recurring weekly schedule    | ISO weekday + minutes after LOCAL midnight    |
+| Recurring break              | same, with `kind = 'break'`                   |
+| Dated absence (time off)     | absolute `timestamptz`, plus the entry's zone |
+| Dated availability exception | local calendar `date` + local minutes         |
+
+A recurring shift is **not** a UTC instant. "Monday 09:00" must stay 09:00 after
+a daylight-saving transition even though its UTC offset moved by an hour, so it
+is stored as wall-clock and resolved against the location's timezone when
+needed. Storing it as UTC would silently shift every schedule twice a year.
+
+No date library is used. `Intl.DateTimeFormat` already carries the full IANA
+rule set in Node's ICU, and the only operation needed is wall-clock ↔ instant,
+so `@lacquer/booking-engine/time` wraps `Intl` instead of duplicating that data.
+DST gaps resolve forward (02:30 on a spring-forward day becomes 03:30, never
+01:30) and overlaps resolve to the first occurrence; both are covered by tests.
+
+### Variants carry explicit values
+
+A `service_variants` row stores an absolute `price` and `duration_minutes`, not
+an adjustment against its parent service. Re-pricing "Acrylic Full Set" must
+not silently re-price its "XL" variant, and a historical appointment should be
+reconstructable from the variant row alone.
+
+### Effective value precedence
+
+```text
+price      variant price      → overridden by technician/service price override
+duration   variant duration   → overridden by technician/service duration override
+buffers    salon default → service override → technician/service override
+notice     salon default → staff override
+```
+
+Every level is nullable, and `null` means "inherit" while `0` means "none". A
+technician override is the most specific statement a salon can make, so it wins
+even over a variant. The resolution lives in pure functions in
+`@lacquer/booking-engine`; nothing recomputes it independently.
+
+### Staff eligibility
+
+One rule chain, no competing systems. Skill requirements are authoritative in
+every mode — an explicit assignment opts a technician into an `explicit_only`
+service but never waives a required skill:
+
+1. staff active, service active, variant active
+2. explicit `ineligible` denies unconditionally
+3. at a named location: technician assigned there and service offered there
+4. `explicit_only` services need an explicit `eligible` assignment
+5. technician holds every skill the service and chosen variant require
+
+`evaluateStaffEligibility` returns the failing reasons so the admin UI can
+explain an exclusion instead of silently hiding someone.
+
+### Lifecycle: deactivate, do not delete
+
+Catalog entities — staff profiles, categories, services, variants, add-ons,
+skills — carry `active` and are never hard-deleted, because appointments will
+reference them and a delete would orphan history. Time off is cancelled rather
+than removed, since why a day was blocked stays useful.
+
+Pure configuration joins (a service offered at a location, a skill a service
+requires, a technician's location assignment) are ordinary rows that may be
+deleted outright: they describe the present, not the past. Deleting a category
+sets its services' `category_id` to null rather than removing the services.
+
+### What Milestone 3 must know
+
+- Availability must compose five distinct record types, each first-class in the
+  schema rather than encoded in JSON: recurring work blocks, recurring breaks,
+  dated time off, dated added availability, and dated removed availability.
+- `services.active_time_minutes` / `processing_time_minutes` describe the
+  hands-on and unattended split that `intelligent_overlap` needs. They are
+  stored and validated but nothing reads them for scheduling yet.
+- `tenant_scheduling_settings.double_booking_mode` and the automatic-break
+  configuration are stored only. No break is inserted and no overlap computed.
+- Daily technician limits (`max_appointments_per_day`,
+  `max_booked_minutes_per_day`) are exposed through `getEffectiveDailyLimits`
+  but not enforced.
+- `service_prerequisites` is administered but has no public behaviour.

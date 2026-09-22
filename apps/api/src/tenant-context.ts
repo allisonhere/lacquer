@@ -33,7 +33,7 @@ export function assertPermission(
     );
 }
 export async function resolveTenantContext(
-  db: Database,
+  db: Pick<Database, 'select'>,
   userId: string,
   rawTenantId: unknown,
 ): Promise<TenantContext> {

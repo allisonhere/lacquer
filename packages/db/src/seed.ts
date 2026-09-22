@@ -7,6 +7,7 @@ import {
   tenantMemberships,
   locations,
 } from './index.js';
+import { seedSalonOperations } from './seed-operations.js';
 if (process.env.NODE_ENV === 'production')
   throw new Error('Development seed is disabled in production');
 const { DATABASE_URL } = databaseConfigSchema.parse(process.env);
@@ -68,6 +69,7 @@ try {
         })
         .onConflictDoNothing();
     }
+    await seedSalonOperations(tx, owner.id);
   });
   console.info('Development seed ready (see README for fake credentials)');
 } finally {

@@ -2,7 +2,7 @@
 
 Open-source, multi-tenant salon software. Nail salons first, with a foundation that can support other beauty businesses later. Self-hostable and suitable for a future Lacquer Cloud service.
 
-**Milestone 1: project foundation.** Account authentication, business memberships, fixed permissions, and location setup are implemented. Booking, payments, CRM, calendars, loyalty, waitlists, gift cards, and provider integrations are intentionally absent. This is a foundation preview, not a complete salon booking product.
+**Milestone 4: public customer booking.** Account authentication, business memberships, fixed permissions, and locations (Milestone 1), plus staff profiles, service catalog, variants, add-ons, skills, technician eligibility, per-technician pricing overrides, weekly schedules with split shifts, breaks, time off, dated availability exceptions, and salon scheduling defaults. Milestone 3 adds staff appointment APIs, availability search, historical snapshots, concurrency-safe creation, idempotency, rescheduling, and cancellation. Milestone 4 adds a mobile guest booking flow, safe public catalog and availability APIs, guest contact snapshots, confirmation, and private booking links. Payments, CRM, calendar UI, loyalty, waitlists, gift cards, and provider integrations remain out of scope.
 
 Licensed under **AGPL-3.0-only**; see [LICENSE](LICENSE). Modified versions offered over a network must meet the license's corresponding-source obligations.
 
@@ -25,7 +25,7 @@ docker compose ps
 docker compose logs worker
 ```
 
-The seed is repeatable. It creates two example salons, one location in each, and an owner and technician with memberships in both. It does not overwrite existing passwords.
+The seed is repeatable. It creates two small example salons plus **Lacquer Demo Salon** — two locations (Downtown, North), two technicians (Alex Morgan, Jamie Lee), four categories, four services with variants and add-ons, skills, weekly schedules including a split shift and recurring breaks, one time-off record, dated availability exceptions, and a per-technician pricing override. All data is fictional. It does not overwrite existing passwords.
 
 | Development account  | Password                |
 | -------------------- | ----------------------- |
@@ -55,7 +55,9 @@ pnpm db:seed
 pnpm dev
 ```
 
-Open http://localhost:5173. `pnpm dev` loads the root `.env` and runs web, API, and worker with reloads. All services are started explicitly; no hidden host services are required.
+Open [the sign-in page](http://localhost:5173/login) and use the demo credentials above. `pnpm dev` loads the root `.env` and runs web, API, and worker with reloads. All services are started explicitly; no hidden host services are required.
+
+For the customer experience, open [the demo salon booking page](http://localhost:5173/book/lacquer-demo). No customer account is required. Other salons can enable online booking from the salon overview. See [public booking](docs/public-booking.md) and the [Milestone 4 handoff](docs/handoff-milestone-4.md).
 
 ## Workspace
 
@@ -69,7 +71,7 @@ packages/
   schemas/             Shared Zod request/response and environment contracts
   types/               Roles, permissions, common domain types
   ui/                  Shared Svelte button and notice
-  booking-engine/      Reserved pure-domain package; no booking implementation
+  booking-engine/      Pure domain rules: money, timezones, effective values, eligibility
   integrations/        Reserved provider adapters; no integrations implemented
 docker/                Shared application Dockerfile and test database init
 scripts/               Development helper space
@@ -140,10 +142,56 @@ Interactive docs: http://localhost:3001/docs/ (also proxied through web at `/doc
 | GET, POST  | `/api/v1/tenants/:tenantId/locations`             | Member list; manage_locations create                             |
 | GET, PATCH | `/api/v1/tenants/:tenantId/locations/:locationId` | Member read; manage_locations update                             |
 
+Milestone 2 salon operations. Reads require salon membership; writes require the
+permission named. Money is an integer count of minor currency units (`7500` is
+`$75.00`); durations and buffers are whole minutes.
+
+| Method           | Path                                                                          | Access          |
+| ---------------- | ----------------------------------------------------------------------------- | --------------- |
+| GET, POST        | `/api/v1/tenants/:tenantId/staff`                                             | manage_staff    |
+| GET, PATCH       | `/api/v1/tenants/:tenantId/staff/:staffId`                                    | manage_staff    |
+| GET, PUT         | `/api/v1/tenants/:tenantId/staff/:staffId/locations`                          | manage_staff    |
+| PUT              | `/api/v1/tenants/:tenantId/staff/:staffId/skills`                             | manage_staff    |
+| GET, POST, PUT   | `/api/v1/tenants/:tenantId/staff/:staffId/schedule`                           | manage_staff    |
+| PATCH, DELETE    | `/api/v1/tenants/:tenantId/staff/:staffId/schedule/:blockId`                  | manage_staff    |
+| GET, POST        | `/api/v1/tenants/:tenantId/staff/:staffId/time-off`                           | manage_staff    |
+| PATCH            | `/api/v1/tenants/:tenantId/staff/:staffId/time-off/:timeOffId`                | manage_staff    |
+| GET, POST        | `/api/v1/tenants/:tenantId/staff/:staffId/availability-overrides`             | manage_staff    |
+| DELETE           | `/api/v1/tenants/:tenantId/staff/:staffId/availability-overrides/:overrideId` | manage_staff    |
+| GET              | `/api/v1/tenants/:tenantId/staff/:staffId/service-overrides`                  | manage_staff    |
+| PUT              | `/api/v1/tenants/:tenantId/staff/:staffId/services/:serviceId/override`       | manage_staff    |
+| PUT              | `/api/v1/tenants/:tenantId/staff/:staffId/services/:serviceId/eligibility`    | manage_staff    |
+| GET, POST        | `/api/v1/tenants/:tenantId/categories`                                        | manage_services |
+| GET, PATCH       | `/api/v1/tenants/:tenantId/categories/:categoryId`                            | manage_services |
+| PUT              | `/api/v1/tenants/:tenantId/categories/order`                                  | manage_services |
+| GET, POST        | `/api/v1/tenants/:tenantId/services`                                          | manage_services |
+| GET, PATCH       | `/api/v1/tenants/:tenantId/services/:serviceId`                               | manage_services |
+| PUT              | `/api/v1/tenants/:tenantId/services/:serviceId/locations`                     | manage_services |
+| PUT              | `/api/v1/tenants/:tenantId/services/:serviceId/skills`                        | manage_services |
+| PUT              | `/api/v1/tenants/:tenantId/services/:serviceId/add-ons`                       | manage_services |
+| GET              | `/api/v1/tenants/:tenantId/services/:serviceId/staff`                         | Member read     |
+| GET, POST        | `/api/v1/tenants/:tenantId/services/:serviceId/variants`                      | manage_services |
+| PATCH            | `/api/v1/tenants/:tenantId/services/:serviceId/variants/:variantId`           | manage_services |
+| PUT              | `/api/v1/tenants/:tenantId/services/:serviceId/variants/:variantId/skills`    | manage_services |
+| GET, PUT, DELETE | `/api/v1/tenants/:tenantId/services/:serviceId/prerequisites`                 | manage_services |
+| GET, POST        | `/api/v1/tenants/:tenantId/add-ons`                                           | manage_services |
+| GET, PATCH       | `/api/v1/tenants/:tenantId/add-ons/:addOnId`                                  | manage_services |
+| GET, POST        | `/api/v1/tenants/:tenantId/skills`                                            | manage_services |
+| GET, PATCH       | `/api/v1/tenants/:tenantId/skills/:skillId`                                   | manage_services |
+| GET, PATCH       | `/api/v1/tenants/:tenantId/scheduling-settings`                               | manage_settings |
+
+`GET /services/:serviceId/staff` answers "who can perform this, and at what
+price and length" — it resolves eligibility and the effective price, duration,
+and buffers for every technician, with reasons for anyone excluded.
+
+There are no deletion routes for catalog entities. Staff, services, categories,
+variants, add-ons, and skills are deactivated with `active: false`; time off is
+cancelled. Only configuration joins and schedule rows are removed outright.
+
 All mutations require `Origin` matching APP_URL and `X-Lacquer-Request: 1`, including login and registration. Browser clients send credentials through same-origin cookies. Tenant creation is the bootstrap exception to membership validation: there is no existing tenant to validate, so creation inserts the creator's owner membership in the same transaction. No deletion routes are included; locations can be deactivated with PATCH.
 
 ## Architecture and next step
 
 The backend owns authorization. Users are installation-wide identities; memberships join users to businesses. Every tenant-owned query must be scoped through validated context. Location timezone is independent of installation currency. Redis handles throttling and the demo queue; PostgreSQL remains the durable source of truth.
 
-Read [architecture](docs/architecture.md) and [security](docs/security.md). Recommended Milestone 2: service catalog, staff scheduling primitives, and pure booking-domain rules with tenant-isolation tests, before building the public booking flow. No Milestone 2 behavior is implemented here.
+Read [architecture](docs/architecture.md) and [security](docs/security.md). Milestone 2 adds the salon-operations data model and admin workflows: the catalog, staff scheduling primitives, and pure domain rules with tenant-isolation tests. Milestone 3 adds the authoritative [booking engine](docs/booking-engine.md) and [concurrency protocol](docs/concurrency.md). Milestone 4 adds the [public customer experience](docs/public-booking.md); its [handoff](docs/handoff-milestone-4.md) records current verification and limitations.

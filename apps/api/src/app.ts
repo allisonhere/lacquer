@@ -1,3 +1,4 @@
+import { publicBookingRoutes } from './routes/public-booking.js';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
@@ -18,6 +19,10 @@ import { ApiFault } from './errors.js';
 import { authRoutes } from './routes/auth.js';
 import { tenantRoutes } from './routes/tenants.js';
 import { locationRoutes } from './routes/locations.js';
+import { staffRoutes } from './routes/staff.js';
+import { catalogRoutes } from './routes/catalog.js';
+import { bookingRoutes } from './routes/booking.js';
+import { schedulingRoutes } from './routes/scheduling.js';
 import { typed } from './routes/context.js';
 export async function createApp(config: Config, db: Database, redis: Redis) {
   const app = Fastify({
@@ -34,7 +39,7 @@ export async function createApp(config: Config, db: Database, redis: Redis) {
       serializers: {
         req: (req) => ({
           method: req.method,
-          url: req.url?.split('?')[0],
+          url: req.url?.split('?')[0]?.replace(/(\/public\/bookings\/)[^/]+/, '$1[redacted]'),
           remoteAddress: req.ip,
         }),
         err: (err) => ({
@@ -60,7 +65,7 @@ export async function createApp(config: Config, db: Database, redis: Redis) {
       : 'lacquer_session';
   await app.register(rateLimit, {
     redis,
-    max: 120,
+    max: config.RATE_LIMIT_MAX,
     timeWindow: '1 minute',
     skipOnError: false,
   });
@@ -70,7 +75,7 @@ export async function createApp(config: Config, db: Database, redis: Redis) {
         title: 'Lacquer API',
         version: '0.1.0',
         description:
-          'Milestone 1 foundation. Mutations require Origin matching APP_URL and X-Lacquer-Request: 1.',
+          'Milestone 4 salon operations and guest booking. Public booking routes require no session. Mutations require Origin matching APP_URL and X-Lacquer-Request: 1. Money is an integer count of minor currency units (7500 is $75.00); durations and buffers are whole minutes. Recurring weekly schedules use LOCAL minutes after midnight at the location with ISO weekdays (1 = Monday); dated events use absolute UTC timestamps.',
       },
       components: {
         securitySchemes: {
@@ -86,6 +91,7 @@ export async function createApp(config: Config, db: Database, redis: Redis) {
       .header('X-Request-Id', req.id)
       .header('X-Content-Type-Options', 'nosniff')
       .header('Cache-Control', 'no-store');
+    if(req.url.startsWith('/api/v1/public/')) reply.header('Referrer-Policy','no-referrer');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       if (
         req.headers.origin !== new URL(config.APP_URL).origin ||
@@ -196,6 +202,11 @@ export async function createApp(config: Config, db: Database, redis: Redis) {
       await authRoutes(scoped, deps);
       await tenantRoutes(scoped, deps);
       await locationRoutes(scoped, deps);
+      await staffRoutes(scoped, deps);
+      await catalogRoutes(scoped, deps);
+      await schedulingRoutes(scoped, deps);
+      await bookingRoutes(scoped, deps);
+      await publicBookingRoutes(scoped,deps);
     },
     { prefix: '/api/v1' },
   );
